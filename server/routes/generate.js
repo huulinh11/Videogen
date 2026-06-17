@@ -34,13 +34,14 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 
   try {
-    const response = await fetch(`${VIDEOGEN_API}/api/generate`, {
+    const response = await fetch(VIDEOGEN_API + '/api/generate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-user-api-key': apiKey,
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(60000),
     });
 
     const data = await response.json();

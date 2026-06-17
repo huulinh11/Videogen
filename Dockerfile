@@ -1,5 +1,5 @@
 # Single-stage build for Videogen (frontend pre-built by GitHub Actions)
-FROM node:20-alpine
+FROM node:20-slim
 WORKDIR /app
 
 # Copy server files

@@ -17,6 +17,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+app.set('trust proxy', 1);
+
 // Initialize database
 await initDB();
 
@@ -27,7 +29,7 @@ app.use(express.json({ limit: '100mb' }));
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 200,
   message: { error: 'Too many requests, please try again later' },
 });
 app.use('/api/', limiter);
