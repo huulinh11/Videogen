@@ -53,8 +53,7 @@ export function initDB() {
 
   const existing = db.prepare('SELECT id FROM admin_users WHERE username = ?').get(adminUser);
   if (!existing) {
-    const crypto = await import('crypto');
-    const hash = crypto.createHash('sha256').update(adminPass).digest('hex');
+    const hash = require('crypto').createHash('sha256').update(adminPass).digest('hex');
     db.prepare('INSERT INTO admin_users (username, password_hash) VALUES (?, ?)').run(adminUser, hash);
     console.log(`[DB] Admin user created: ${adminUser}`);
   }
