@@ -1,0 +1,19 @@
+{
+  "name": "videogen-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "cors": "^2.8.5",
+    "multer": "^1.4.5-lts.1",
+    "dotenv": "^16.4.5",
+    "express-rate-limit": "^7.4.0"
+  }
+}

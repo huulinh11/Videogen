@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  videogen:
+    build: .
+    container_name: videogen-app
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - videogen_data:/app/data
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+      - DB_PATH=/app/data/videogen.db
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - JWT_SECRET=${JWT_SECRET:-videogen-jwt-prod-secret-change-me}
+    networks:
+      - videogen_net
+
+volumes:
+  videogen_data:
+
+networks:
+  videogen_net:
+    driver: bridge

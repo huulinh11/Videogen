@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: #020617;
+  color: #e2e8f0;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+@layer utilities {
+  .bg-glass {
+    background: rgba(15, 23, 42, 0.7);
+    backdrop-filter: blur(20px);
+  }
+  .bg-glass-strong {
+    background: rgba(15, 23, 42, 0.92);
+    backdrop-filter: blur(24px);
+  }
+}
