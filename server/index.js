@@ -47,7 +47,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // Serve frontend static files in production
-const clientDist = path.join(__dirname, '..', 'client', 'dist');
+const clientDist = path.join(__dirname, 'client', 'dist');
 app.use(express.static(clientDist));
 
 // SPA fallback - serve index.html for all non-API routes
