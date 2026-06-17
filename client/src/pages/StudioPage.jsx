@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { MODELS, getModel } from '../config/models';
 import { api } from '../services/api';
 
@@ -26,7 +26,7 @@ export default function StudioPage() {
   const [characterPhoto, setCharacterPhoto] = useState(null);
   const [motionVideo, setMotionVideo] = useState(null);
   const [consistencyImages, setConsistencyImages] = useState([]);
-  const [uploading, setUploading] = useState(false);
+  const [uploadErrors, setUploadErrors] = useState({});
 
   // Job states
   const [jobs, setJobs] = useState([]);
@@ -36,69 +36,79 @@ export default function StudioPage() {
   const [successMsg, setSuccessMsg] = useState('');
 
   const pollingRefs = useRef({});
+  const uploadingRefs = useRef({});
 
   useEffect(() => {
     api.getModels().then(setModels).catch(() => setModels(MODELS));
   }, []);
 
+  useEffect(() => {
+    return () => {
+      Object.values(pollingRefs.current).forEach(clearInterval);
+    };
+  }, []);
+
   const currentModel = getModel(selectedModel);
 
-  const uploadFile = useCallback(async (file, type) => {
+  const uploadFile = async (file) => {
     try {
       const base64 = await readFileAsBase64(file);
-      const data = await api.upload(file.name, file.type, base64.split(',')[1]);
+      const rawBase64 = base64.includes(',') ? base64.split(',')[1] : base64;
+      const data = await api.upload(file.name, file.type, rawBase64);
       return data.url;
     } catch (err) {
-      throw new Error(`Upload failed: ${err.message}`);
+      throw new Error(err.message || 'Upload failed');
     }
-  }, []);
+  };
+
+  const uploadWithTracking = async (file, uploadKey) => {
+    uploadingRefs.current[uploadKey] = true;
+    setUploadErrors((prev) => ({ ...prev, [uploadKey]: null }));
+    try {
+      const url = await uploadFile(file);
+      return url;
+    } catch (err) {
+      setUploadErrors((prev) => ({ ...prev, [uploadKey]: err.message }));
+      return null;
+    } finally {
+      uploadingRefs.current[uploadKey] = false;
+    }
+  };
 
   const handleStartImage = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const uploadKey = 'startImage';
     setStartImage({ file, localUrl: URL.createObjectURL(file), status: 'uploading' });
-    try {
-      const url = await uploadFile(file);
-      setStartImage((prev) => prev && { ...prev, uploadUrl: url, status: 'ready' });
-    } catch (err) {
-      setStartImage((prev) => prev && { ...prev, status: 'failed' });
-    }
+    const url = await uploadWithTracking(file, uploadKey);
+    setStartImage((prev) => prev && { ...prev, uploadUrl: url, status: url ? 'ready' : 'failed' });
   };
 
   const handleEndImage = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const uploadKey = 'endImage';
     setEndImage({ file, localUrl: URL.createObjectURL(file), status: 'uploading' });
-    try {
-      const url = await uploadFile(file);
-      setEndImage((prev) => prev && { ...prev, uploadUrl: url, status: 'ready' });
-    } catch (err) {
-      setEndImage((prev) => prev && { ...prev, status: 'failed' });
-    }
+    const url = await uploadWithTracking(file, uploadKey);
+    setEndImage((prev) => prev && { ...prev, uploadUrl: url, status: url ? 'ready' : 'failed' });
   };
 
   const handleCharacterPhoto = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const uploadKey = 'characterPhoto';
     setCharacterPhoto({ file, localUrl: URL.createObjectURL(file), status: 'uploading' });
-    try {
-      const url = await uploadFile(file);
-      setCharacterPhoto((prev) => prev && { ...prev, uploadUrl: url, status: 'ready' });
-    } catch (err) {
-      setCharacterPhoto((prev) => prev && { ...prev, status: 'failed' });
-    }
+    const url = await uploadWithTracking(file, uploadKey);
+    setCharacterPhoto((prev) => prev && { ...prev, uploadUrl: url, status: url ? 'ready' : 'failed' });
   };
 
   const handleMotionVideo = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const uploadKey = 'motionVideo';
     setMotionVideo({ file, localUrl: URL.createObjectURL(file), status: 'uploading' });
-    try {
-      const url = await uploadFile(file);
-      setMotionVideo((prev) => prev && { ...prev, uploadUrl: url, status: 'ready' });
-    } catch (err) {
-      setMotionVideo((prev) => prev && { ...prev, status: 'failed' });
-    }
+    const url = await uploadWithTracking(file, uploadKey);
+    setMotionVideo((prev) => prev && { ...prev, uploadUrl: url, status: url ? 'ready' : 'failed' });
   };
 
   const handleConsistencyImages = async (e) => {
@@ -112,21 +122,26 @@ export default function StudioPage() {
     setConsistencyImages((prev) => [...prev, ...newImages]);
 
     for (const img of newImages) {
-      try {
-        const url = await uploadFile(img.file);
-        setConsistencyImages((prev) =>
-          prev.map((ci) => (ci.id === img.id ? { ...ci, uploadUrl: url, status: 'ready' } : ci))
-        );
-      } catch {
-        setConsistencyImages((prev) =>
-          prev.map((ci) => (ci.id === img.id ? { ...ci, status: 'failed' } : ci))
-        );
-      }
+      const url = await uploadFile(img.file);
+      setConsistencyImages((prev) =>
+        prev.map((ci) => (ci.id === img.id ? { ...ci, uploadUrl: url, status: url ? 'ready' : 'failed' } : ci))
+      );
     }
   };
 
   const removeConsistencyImage = (id) => {
     setConsistencyImages((prev) => prev.filter((img) => img.id !== id));
+  };
+
+  const isUploading = () => {
+    const checks = [
+      startImage?.status,
+      endImage?.status,
+      characterPhoto?.status,
+      motionVideo?.status,
+    ];
+    const refImages = consistencyImages.map((ci) => ci.status);
+    return [...checks, ...refImages].includes('uploading');
   };
 
   const buildPayload = () => {
@@ -211,11 +226,13 @@ export default function StudioPage() {
 
           setJobs((prev) =>
             prev.map((j) =>
-              j.job_id === jobId ? { ...j, status: 'done', result_url: data.url, progress: 100 } : j
+              (j.job_id === jobId || j.id === jobId)
+                ? { ...j, status: 'done', result_url: data.url, progress: 100 }
+                : j
             )
           );
           setActiveJob((prev) =>
-            prev?.job_id === jobId
+            (prev?.job_id === jobId || prev?.id === jobId)
               ? { ...prev, status: 'done', result_url: data.url, progress: 100 }
               : prev
           );
@@ -226,30 +243,38 @@ export default function StudioPage() {
 
           setJobs((prev) =>
             prev.map((j) =>
-              j.job_id === jobId
+              (j.job_id === jobId || j.id === jobId)
                 ? { ...j, status: 'failed', error: data.error || 'Processing failed' }
                 : j
             )
           );
           setActiveJob((prev) =>
-            prev?.job_id === jobId
+            (prev?.job_id === jobId || prev?.id === jobId)
               ? { ...prev, status: 'failed', error: data.error || 'Processing failed' }
               : prev
           );
           setGenerating(false);
         } else {
-          const progress = data.progress != null ? (data.progress <= 1 ? Math.round(data.progress * 100) : data.progress) : undefined;
+          const prog = data.progress != null
+            ? (data.progress <= 1 ? Math.round(data.progress * 100) : data.progress)
+            : undefined;
           setJobs((prev) =>
-            prev.map((j) => (j.job_id === jobId ? { ...j, progress: progress || j.progress + 2, status: 'processing' } : j))
+            prev.map((j) =>
+              (j.job_id === jobId || j.id === jobId)
+                ? { ...j, progress: prog || (j.progress || 10) + 2, status: 'processing' }
+                : j
+            )
           );
           setActiveJob((prev) =>
-            prev?.job_id === jobId ? { ...prev, progress: progress || (prev.progress || 10) + 2 } : prev
+            (prev?.job_id === jobId || prev?.id === jobId)
+              ? { ...prev, progress: prog || (prev.progress || 10) + 2 }
+              : prev
           );
         }
-      } catch (err) {
+      } catch (_) {
         // Keep polling silently
       }
-    }, 4500);
+    }, 5000);
   };
 
   const handleGenerate = async () => {
@@ -261,22 +286,28 @@ export default function StudioPage() {
       return;
     }
 
-    // Check uploads
-    const uploadingAssets =
-      startImage?.status === 'uploading' ||
-      endImage?.status === 'uploading' ||
-      characterPhoto?.status === 'uploading' ||
-      motionVideo?.status === 'uploading' ||
-      consistencyImages.some((ci) => ci.status === 'uploading');
-
-    if (uploadingAssets) {
+    // Check if still uploading
+    if (isUploading()) {
       setError('Media files are still uploading. Please wait...');
+      return;
+    }
+
+    // Check for failed uploads that are required
+    const failedRequired = [
+      startImage?.status === 'failed' ? 'Start image upload failed. Please re-upload.' : null,
+      characterPhoto?.status === 'failed' ? 'Character photo upload failed. Please re-upload.' : null,
+      motionVideo?.status === 'failed' ? 'Motion video upload failed. Please re-upload.' : null,
+    ].filter(Boolean);
+
+    if (failedRequired.length > 0) {
+      setError(failedRequired[0]);
       return;
     }
 
     try {
       const payload = buildPayload();
       setGenerating(true);
+      setError('');
 
       const queuedJob = {
         id: `queued_${Date.now()}`,
@@ -308,27 +339,36 @@ export default function StudioPage() {
       startPolling(jobId);
       setSuccessMsg(`Job created: ${jobId}`);
     } catch (err) {
-      setError(err.message || 'Failed to start generation');
+      setError(err.message || 'Failed to start generation. Please check your API key in Account settings.');
       setGenerating(false);
+      setActiveJob((prev) =>
+        prev ? { ...prev, status: 'failed', error: err.message } : null
+      );
     }
   };
 
+  const retryUpload = (type) => {
+    // Clear failed state so user can re-upload
+    if (type === 'start') setStartImage(null);
+    if (type === 'end') setEndImage(null);
+    if (type === 'character') setCharacterPhoto(null);
+    if (type === 'motion') setMotionVideo(null);
+    setUploadErrors((prev) => ({ ...prev, [type]: null }));
+  };
+
   const handleCancel = () => {
-    // Stop all polling
-    Object.keys(pollingRefs.current).forEach((key) => {
-      clearInterval(pollingRefs.current[key]);
-    });
+    Object.values(pollingRefs.current).forEach(clearInterval);
     pollingRefs.current = {};
 
     if (activeJob) {
       setJobs((prev) =>
         prev.map((j) =>
-          j.job_id === activeJob.job_id
+          (j.job_id === activeJob.job_id || j.id === activeJob.id)
             ? { ...j, status: 'failed', error: 'Cancelled by user' }
             : j
         )
       );
-      setActiveJob((prev) => (prev ? { ...prev, status: 'failed', error: 'Cancelled by user' } : null));
+      setActiveJob((prev) => prev ? { ...prev, status: 'failed', error: 'Cancelled by user' } : null);
     }
     setGenerating(false);
   };
@@ -364,6 +404,8 @@ export default function StudioPage() {
                   setCharacterPhoto(null);
                   setMotionVideo(null);
                   setConsistencyImages([]);
+                  setError('');
+                  setSuccessMsg('');
                 }}
                 className={`text-left p-2.5 rounded-xl border text-xs transition-all ${
                   selectedModel === m.id
@@ -380,12 +422,11 @@ export default function StudioPage() {
           </div>
         </div>
 
-        {/* Model Description */}
         <div className="bg-glass border border-white/10 rounded-2xl p-4 shadow-xl">
           <p className="text-xs text-slate-400">{currentModel.description}</p>
         </div>
 
-        {/* Mode Selection */}
+        {/* Mode */}
         {currentModel.modes.length > 1 && (
           <div className="bg-glass border border-white/10 rounded-2xl p-4 shadow-xl">
             <h2 className="text-sm font-bold text-slate-300 mb-3 uppercase tracking-wider">Mode</h2>
@@ -408,20 +449,18 @@ export default function StudioPage() {
         )}
 
         {/* Prompt */}
-        {(selectedModel !== 'kling-motion' || true) && (
-          <div className="bg-glass border border-white/10 rounded-2xl p-4 shadow-xl">
-            <h2 className="text-sm font-bold text-slate-300 mb-3 uppercase tracking-wider">
-              {selectedModel === 'kling-motion' ? 'Prompt (Optional)' : 'Prompt *'}
-            </h2>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={4}
-              className="w-full bg-black/30 border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500/40 resize-none"
-              placeholder="Describe your video scene in detail..."
-            />
-          </div>
-        )}
+        <div className="bg-glass border border-white/10 rounded-2xl p-4 shadow-xl">
+          <h2 className="text-sm font-bold text-slate-300 mb-3 uppercase tracking-wider">
+            {selectedModel === 'kling-motion' ? 'Prompt (Optional)' : 'Prompt *'}
+          </h2>
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            rows={4}
+            className="w-full bg-black/30 border border-white/10 rounded-xl py-2.5 px-3 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500/40 resize-none"
+            placeholder="Describe your video scene in detail..."
+          />
+        </div>
 
         {/* Duration */}
         {currentModel.supportsDuration && (
@@ -500,20 +539,21 @@ export default function StudioPage() {
 
             {selectedModel === 'kling-motion' ? (
               <div className="space-y-3">
-                {/* Character Photo */}
                 <div>
                   <span className="text-[10px] font-bold text-slate-400">Character Photo *</span>
                   <label className="mt-1 block cursor-pointer">
                     {characterPhoto ? (
                       <div className="relative rounded-lg overflow-hidden aspect-video border border-emerald-500/20 bg-black/40">
-                        {characterPhoto.file.type.startsWith('image/') ? (
-                          <img src={characterPhoto.localUrl} alt="Character" className="w-full h-full object-cover" />
-                        ) : (
-                          <video src={characterPhoto.localUrl} className="w-full h-full object-cover" />
-                        )}
+                        <img src={characterPhoto.localUrl} alt="Character" className="w-full h-full object-cover" />
                         {characterPhoto.status === 'uploading' && (
                           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-400"></div>
+                          </div>
+                        )}
+                        {characterPhoto.status === 'failed' && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center flex-col gap-1">
+                            <span className="text-red-400 text-xs">Upload failed</span>
+                            <button onClick={(e) => { e.preventDefault(); retryUpload('character'); }} className="text-emerald-400 text-[10px] underline">Retry</button>
                           </div>
                         )}
                       </div>
@@ -527,7 +567,6 @@ export default function StudioPage() {
                   </label>
                 </div>
 
-                {/* Motion Video */}
                 <div>
                   <span className="text-[10px] font-bold text-slate-400">Reference Motion Video *</span>
                   <label className="mt-1 block cursor-pointer">
@@ -537,6 +576,12 @@ export default function StudioPage() {
                         {motionVideo.status === 'uploading' && (
                           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-400"></div>
+                          </div>
+                        )}
+                        {motionVideo.status === 'failed' && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center flex-col gap-1">
+                            <span className="text-red-400 text-xs">Upload failed</span>
+                            <button onClick={(e) => { e.preventDefault(); retryUpload('motion'); }} className="text-emerald-400 text-[10px] underline">Retry</button>
                           </div>
                         )}
                       </div>
@@ -576,7 +621,6 @@ export default function StudioPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {/* Start Frame */}
                 <div>
                   <span className="text-[10px] font-bold text-slate-400">Start Frame *</span>
                   <label className="mt-1 block cursor-pointer">
@@ -586,6 +630,12 @@ export default function StudioPage() {
                         {startImage.status === 'uploading' && (
                           <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
                             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-400"></div>
+                          </div>
+                        )}
+                        {startImage.status === 'failed' && (
+                          <div className="absolute inset-0 bg-black/60 flex items-center justify-center flex-col gap-1">
+                            <span className="text-red-400 text-xs">Upload failed</span>
+                            <button onClick={(e) => { e.preventDefault(); retryUpload('start'); }} className="text-emerald-400 text-[10px] underline">Retry</button>
                           </div>
                         )}
                       </div>
@@ -599,7 +649,6 @@ export default function StudioPage() {
                   </label>
                 </div>
 
-                {/* End Frame (optional) */}
                 {currentModel.supportsEndFrame && (
                   <div>
                     <span className="text-[10px] font-bold text-slate-400">End Frame (Optional)</span>
@@ -607,6 +656,17 @@ export default function StudioPage() {
                       {endImage ? (
                         <div className="relative rounded-lg overflow-hidden aspect-video border border-emerald-500/20 bg-black/40">
                           <img src={endImage.localUrl} alt="End" className="w-full h-full object-cover" />
+                          {endImage.status === 'uploading' && (
+                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-emerald-400"></div>
+                            </div>
+                          )}
+                          {endImage.status === 'failed' && (
+                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center flex-col gap-1">
+                              <span className="text-red-400 text-xs">Upload failed</span>
+                              <button onClick={(e) => { e.preventDefault(); retryUpload('end'); }} className="text-emerald-400 text-[10px] underline">Retry</button>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="rounded-lg aspect-video border border-dashed border-white/10 bg-black/20 flex flex-col items-center justify-center gap-1 hover:border-emerald-500/30 transition-colors">
@@ -626,13 +686,18 @@ export default function StudioPage() {
         {/* Generate Button */}
         <button
           onClick={handleGenerate}
-          disabled={generating}
+          disabled={generating || isUploading()}
           className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 disabled:cursor-not-allowed text-white py-3 rounded-xl font-bold text-sm transition-all shadow-lg shadow-emerald-500/20"
         >
           {generating ? (
             <span className="flex items-center justify-center gap-2">
               <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
               Generating...
+            </span>
+          ) : isUploading() ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></span>
+              Uploading...
             </span>
           ) : (
             '⚡ Generate Video'
@@ -657,9 +722,9 @@ export default function StudioPage() {
         )}
       </aside>
 
-      {/* Main Content */}
+      {/* Main */}
       <div className="flex-1 space-y-4">
-        {/* Active Job Preview */}
+        {/* Active Job */}
         {activeJob && (
           <div className="bg-glass border border-white/10 rounded-2xl p-6 shadow-xl">
             <h2 className="text-lg font-bold text-white mb-4">
@@ -670,7 +735,6 @@ export default function StudioPage() {
                 : `Rendering ${getModel(activeJob.model).label}...`}
             </h2>
 
-            {/* Progress Bar */}
             {activeJob.status === 'processing' && (
               <div className="mb-4">
                 <div className="h-2 bg-white/5 rounded-full overflow-hidden">
@@ -679,69 +743,41 @@ export default function StudioPage() {
                     style={{ width: `${Math.min(activeJob.progress || 10, 95)}%` }}
                   />
                 </div>
-                <p className="text-xs text-slate-400 mt-2 font-mono">
-                  {activeJob.progress || 10}% - Processing your video...
-                </p>
+                <p className="text-xs text-slate-400 mt-2 font-mono">{activeJob.progress || 10}% - Processing...</p>
               </div>
             )}
 
-            {/* Video Preview */}
             {activeJob.status === 'done' && activeJob.result_url && (
               <div className="rounded-xl overflow-hidden border border-white/10 bg-black shadow-2xl mb-4">
-                <video
-                  src={activeJob.result_url}
-                  controls
-                  autoPlay
-                  className="w-full max-h-[500px] object-contain"
-                />
+                <video src={activeJob.result_url} controls autoPlay className="w-full max-h-[500px] object-contain" />
               </div>
             )}
 
-            {/* Error */}
             {activeJob.status === 'failed' && (
               <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm mb-4">
                 {activeJob.error || 'Unknown error occurred'}
               </div>
             )}
 
-            {/* Job Info */}
             <div className="flex flex-wrap gap-2 text-xs">
-              <span className="px-2 py-1 rounded bg-white/5 text-slate-400 font-mono">
-                Model: {getModel(activeJob.model).label}
-              </span>
-              <span className="px-2 py-1 rounded bg-white/5 text-slate-400 font-mono">
-                Mode: {activeJob.mode}
-              </span>
+              <span className="px-2 py-1 rounded bg-white/5 text-slate-400 font-mono">Model: {getModel(activeJob.model).label}</span>
+              <span className="px-2 py-1 rounded bg-white/5 text-slate-400 font-mono">Mode: {activeJob.mode}</span>
               {activeJob.job_id && (
-                <span className="px-2 py-1 rounded bg-white/5 text-slate-400 font-mono">
-                  Job: {activeJob.job_id.substring(0, 16)}...
-                </span>
+                <span className="px-2 py-1 rounded bg-white/5 text-slate-400 font-mono">Job: {activeJob.job_id.substring(0, 16)}...</span>
               )}
-              <button onClick={clearJob} className="px-2 py-1 rounded bg-white/5 text-slate-400 hover:text-white transition-colors">
-                Clear
-              </button>
+              <button onClick={clearJob} className="px-2 py-1 rounded bg-white/5 text-slate-400 hover:text-white transition-colors">Clear</button>
               {activeJob.result_url && (
-                <a
-                  href={activeJob.result_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-2 py-1 rounded bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition-colors"
-                >
-                  Download
-                </a>
+                <a href={activeJob.result_url} target="_blank" rel="noopener noreferrer" className="px-2 py-1 rounded bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition-colors">Download</a>
               )}
             </div>
           </div>
         )}
 
-        {/* Empty State */}
         {!activeJob && (
           <div className="bg-glass border border-white/10 rounded-2xl p-12 shadow-xl flex flex-col items-center justify-center text-center">
             <span className="text-5xl mb-4">🎬</span>
             <h3 className="text-lg font-bold text-white mb-2">Ready to Create</h3>
-            <p className="text-sm text-slate-400 max-w-md">
-              Select a model on the left, write your prompt, and click Generate to bring your idea to life.
-            </p>
+            <p className="text-sm text-slate-400 max-w-md">Select a model on the left, write your prompt, and click Generate.</p>
           </div>
         )}
 
@@ -755,15 +791,13 @@ export default function StudioPage() {
                   key={job.id || idx}
                   onClick={() => job.status !== 'queued' && setActiveJob(job)}
                   className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                    activeJob?.id === job.id
+                    activeJob?.id === job.id || activeJob?.job_id === job.job_id
                       ? 'bg-emerald-500/10 border-emerald-500/30'
                       : 'bg-black/20 border-white/5 hover:border-white/10'
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
-                    <span className="text-lg">
-                      {job.status === 'done' ? '✅' : job.status === 'failed' ? '❌' : job.status === 'processing' ? '🔄' : '⏳'}
-                    </span>
+                    <span className="text-lg">{job.status === 'done' ? '✅' : job.status === 'failed' ? '❌' : job.status === 'processing' ? '🔄' : '⏳'}</span>
                     <div className="min-w-0">
                       <p className="text-xs font-semibold truncate">{job.prompt || 'No prompt'}</p>
                       <span className="text-[10px] text-slate-500 font-mono">{getModel(job.model).label}</span>
@@ -771,9 +805,7 @@ export default function StudioPage() {
                   </div>
                   <span className={`text-[10px] font-bold uppercase shrink-0 ${
                     job.status === 'done' ? 'text-emerald-400' : job.status === 'failed' ? 'text-red-400' : 'text-yellow-400'
-                  }`}>
-                    {job.status}
-                  </span>
+                  }`}>{job.status}</span>
                 </div>
               ))}
             </div>
